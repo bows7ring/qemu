@@ -882,6 +882,15 @@ void riscv_cpu_validate_set_extensions(RISCVCPU *cpu, Error **errp)
      * validated and set everything we need.
      */
     riscv_cpu_disable_priv_spec_isa_exts(cpu);
+
+    if (cpu->cfg.pdis_regs &&
+        (riscv_cpu_mxl(env) != MXL_RV64 || !riscv_has_ext(env, RVS) ||
+         !cpu->cfg.ext_smstateen || !cpu->cfg.ext_smcsrind ||
+         !cpu->cfg.ext_sscsrind || !cpu->cfg.ext_sscofpmf)) {
+        error_setg(errp, "x-pdis-regs requires RV64 S-mode, Smstateen, "
+                        "Smcsrind, Sscsrind and Sscofpmf");
+        return;
+    }
 }
 
 #ifndef CONFIG_USER_ONLY

@@ -419,6 +419,24 @@ static bool envcfg_needed(void *opaque)
     return (env->priv_ver >= PRIV_VERSION_1_12_0 ? 1 : 0);
 }
 
+static bool pdis_regs_needed(void *opaque)
+{
+    return RISCV_CPU(opaque)->cfg.pdis_regs;
+}
+
+static const VMStateDescription vmstate_pdis_regs = {
+    .name = "cpu/pdis-registers-test",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = pdis_regs_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT64(env.pdis_ctl, RISCVCPU),
+        VMSTATE_UINT64(env.pdis_vsctl, RISCVCPU),
+        VMSTATE_UINT64(env.pdis_counter, RISCVCPU),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_envcfg = {
     .name = "cpu/envcfg",
     .version_id = 2,
@@ -649,6 +667,7 @@ const VMStateDescription vmstate_riscv_cpu = {
         &vmstate_envcfg,
         &vmstate_debug,
         &vmstate_smstateen,
+        &vmstate_pdis_regs,
         &vmstate_jvt,
         &vmstate_elp,
         &vmstate_ssp,

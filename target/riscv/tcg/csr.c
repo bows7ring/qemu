@@ -401,11 +401,9 @@ static RISCVException scountinhibit_pred(CPURISCVState *env, int csrno)
 {
     RISCVCPU *cpu = env_archcpu(env);
 
-    if (!cpu->cfg.ext_ssccfg || !cpu->cfg.ext_smcdeleg) {
-        return RISCV_EXCP_ILLEGAL_INST;
-    }
-
-    if (!get_field(env->menvcfg, MENVCFG_CDE)) {
+    if (!cpu->cfg.pdis_regs &&
+        (!cpu->cfg.ext_ssccfg || !cpu->cfg.ext_smcdeleg ||
+         !get_field(env->menvcfg, MENVCFG_CDE))) {
         return RISCV_EXCP_ILLEGAL_INST;
     }
 
@@ -414,6 +412,92 @@ static RISCVException scountinhibit_pred(CPURISCVState *env, int csrno)
     }
 
     return smode(env, csrno);
+}
+
+static RISCVException pdis_regs(CPURISCVState *env, int csrno)
+{
+    if (!riscv_cpu_cfg(env)->pdis_regs) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+    if (csrno == CSR_XPDIS_MCTL) {
+        return RISCV_EXCP_NONE;
+    }
+    if (csrno == CSR_XPDIS_VSCTL && !riscv_has_ext(env, RVH)) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+    return smstateen_acc_ok(env, 0, XPDIS_STATEEN);
+}
+
+static bool pdis_vsctl(CPURISCVState *env, int csrno)
+{
+    return csrno == CSR_XPDIS_VSCTL ||
+           (csrno == CSR_XPDIS_SCTL && env->virt_enabled);
+}
+
+static RISCVException read_pdis_ctl(CPURISCVState *env, int csrno,
+                                   target_ulong *val)
+{
+    *val = env->pdis_ctl;
+    if (csrno != CSR_XPDIS_MCTL) {
+        *val &= ~XPDIS_CTL_M;
+    }
+    if (pdis_vsctl(env, csrno)) {
+        *val = (*val & ~(XPDIS_CTL_U | XPDIS_CTL_S)) | env->pdis_vsctl;
+    }
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_pdis_ctl(CPURISCVState *env, int csrno,
+                                    target_ulong val, uintptr_t ra)
+{
+    uint64_t mask = XPDIS_CTL_SEL | XPDIS_CTL_U | XPDIS_CTL_S |
+                    XPDIS_CTL_M | XPDIS_CTL_OF;
+
+    /* MEM, ACC, TS, HPM recording, addresses and custom fields are WARL 0. */
+    if ((val & XPDIS_CTL_SEL) > 4) {
+        val &= ~XPDIS_CTL_SEL;
+    }
+    if (csrno != CSR_XPDIS_MCTL) {
+        mask &= ~XPDIS_CTL_M;
+    }
+    if (pdis_vsctl(env, csrno)) {
+        env->pdis_vsctl = val & (XPDIS_CTL_U | XPDIS_CTL_S);
+        mask &= ~(XPDIS_CTL_U | XPDIS_CTL_S);
+    }
+    env->pdis_ctl = (env->pdis_ctl & ~mask) | (val & mask);
+    /* No TCG instruction-selection hook: software writes never raise LCOFI. */
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException read_pdis_counter(CPURISCVState *env, int csrno,
+                                       target_ulong *val)
+{
+    *val = env->pdis_counter;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_pdis_counter(CPURISCVState *env, int csrno,
+                                        target_ulong val, uintptr_t ra)
+{
+    /* Both 32-bit fields are writable; they do not advance in this model. */
+    env->pdis_counter = val;
+    return RISCV_EXCP_NONE;
+}
+
+static uint32_t pdis_scountinhibit_mask(CPURISCVState *env)
+{
+    const RISCVCPUConfig *cfg = riscv_cpu_cfg(env);
+    uint32_t mask = 0;
+
+    if (env->menvcfg & MENVCFG_CDE) {
+        if (cfg->ext_ssccfg && cfg->ext_smcdeleg) {
+            mask = env->mcounteren & ~XPDIS_INHIBIT;
+        }
+        if (env->mstateen[0] & XPDIS_STATEEN) {
+            mask |= XPDIS_INHIBIT;
+        }
+    }
+    return mask;
 }
 
 static bool csrind_extensions_present(CPURISCVState *env)
@@ -1674,6 +1758,12 @@ static RISCVException read_scountovf(CPURISCVState *env, int csrno,
         }
     }
 
+    if (riscv_cpu_cfg(env)->pdis_regs &&
+        smstateen_acc_ok(env, 0, XPDIS_STATEEN) == RISCV_EXCP_NONE &&
+        (env->pdis_ctl & XPDIS_CTL_OF)) {
+        *val |= XPDIS_INHIBIT;
+    }
+
     return RISCV_EXCP_NONE;
 }
 
@@ -2921,6 +3011,20 @@ static int rmw_xireg_csrind(CPURISCVState *env, int csrno,
     bool virt = csrno == CSR_VSIREG ? true : false;
     int ret = -EINVAL;
 
+    if (riscv_cpu_cfg(env)->pdis_regs && (isel == 0x60 || isel == 0x61) &&
+        ((csrno >= CSR_SIREG && csrno <= CSR_SIREG6) ||
+         (csrno >= CSR_VSIREG && csrno <= CSR_VSIREG6))) {
+        ret = smstateen_acc_ok(env, 0, XPDIS_STATEEN);
+        if (ret != RISCV_EXCP_NONE) {
+            return ret;
+        }
+        /* Empty, read-only window: no samples are manufactured. */
+        if (val) {
+            *val = 0;
+        }
+        return RISCV_EXCP_NONE;
+    }
+
     if (xiselect_cd_range(isel)) {
         ret = rmw_xireg_cd(env, csrno, isel, val, new_val, wr_mask);
     } else if (xiselect_ctr_range(csrno, isel)) {
@@ -3116,10 +3220,15 @@ static RISCVException write_mcountinhibit(CPURISCVState *env, int csrno,
     PMUCTRState *counter;
     RISCVCPU *cpu = env_archcpu(env);
     uint32_t present_ctrs = cpu->pmu_avail_ctrs | COUNTEREN_CY | COUNTEREN_IR;
-    target_ulong updated_ctrs = (env->mcountinhibit ^ val) & present_ctrs;
+    target_ulong updated_ctrs;
     uint64_t mhpmctr_val, prev_count, curr_count;
 
-    /* WARL register - disable unavailable counters; TM bit is always 0 */
+    if (cpu->cfg.pdis_regs) {
+        present_ctrs |= XPDIS_INHIBIT;
+    }
+    updated_ctrs = (env->mcountinhibit ^ val) & present_ctrs;
+
+    /* Bit 1 inhibits PDIS in the opt-in model, never the time CSR. */
     env->mcountinhibit = val & present_ctrs;
 
     /* Check if any other counter is also monitoring cycles/instructions */
@@ -3156,6 +3265,10 @@ static RISCVException write_mcountinhibit(CPURISCVState *env, int csrno,
 static RISCVException read_scountinhibit(CPURISCVState *env, int csrno,
                                          target_ulong *val)
 {
+    if (riscv_cpu_cfg(env)->pdis_regs) {
+        *val = env->mcountinhibit & pdis_scountinhibit_mask(env);
+        return RISCV_EXCP_NONE;
+    }
     /* S-mode can only access the bits delegated by M-mode */
     *val = env->mcountinhibit & env->mcounteren;
     return RISCV_EXCP_NONE;
@@ -3164,6 +3277,12 @@ static RISCVException read_scountinhibit(CPURISCVState *env, int csrno,
 static RISCVException write_scountinhibit(CPURISCVState *env, int csrno,
                                           target_ulong val, uintptr_t ra)
 {
+    if (riscv_cpu_cfg(env)->pdis_regs) {
+        uint32_t mask = pdis_scountinhibit_mask(env);
+
+        val = (env->mcountinhibit & ~mask) | (val & mask);
+        return write_mcountinhibit(env, csrno, val, ra);
+    }
     return write_mcountinhibit(env, csrno, val & env->mcounteren, ra);
 }
 
@@ -3420,7 +3539,7 @@ static RISCVException write_menvcfg(CPURISCVState *env, int csrno,
     if (riscv_cpu_mxl(env) == MXL_RV64) {
         mask |= (cfg->ext_svpbmt ? MENVCFG_PBMTE : 0) |
                 (cfg->ext_sstc ? MENVCFG_STCE : 0) |
-                (cfg->ext_smcdeleg ? MENVCFG_CDE : 0) |
+                ((cfg->ext_smcdeleg || cfg->pdis_regs) ? MENVCFG_CDE : 0) |
                 (cfg->ext_svadu ? MENVCFG_ADUE : 0) |
                 (cfg->ext_ssdbltrp ? MENVCFG_DTE : 0);
 
@@ -3464,7 +3583,7 @@ static RISCVException write_menvcfgh(CPURISCVState *env, int csrno,
     uint64_t mask = (cfg->ext_svpbmt ? MENVCFG_PBMTE : 0) |
                     (cfg->ext_sstc ? MENVCFG_STCE : 0) |
                     (cfg->ext_svadu ? MENVCFG_ADUE : 0) |
-                    (cfg->ext_smcdeleg ? MENVCFG_CDE : 0) |
+                    ((cfg->ext_smcdeleg || cfg->pdis_regs) ? MENVCFG_CDE : 0) |
                     (cfg->ext_ssdbltrp ? MENVCFG_DTE : 0);
     uint64_t valh = (uint64_t)val << 32;
     bool stce_changed = false;
@@ -3738,6 +3857,9 @@ static RISCVException write_mstateen0(CPURISCVState *env, int csrno,
         if (riscv_cpu_cfg(env)->ext_ssctr) {
             wr_mask |= SMSTATEEN0_CTR;
         }
+        if (riscv_cpu_cfg(env)->pdis_regs) {
+            wr_mask |= XPDIS_STATEEN;
+        }
     }
 
     return write_mstateen(env, csrno, wr_mask, new_val);
@@ -3856,6 +3978,9 @@ static RISCVException write_hstateen0(CPURISCVState *env, int csrno,
 
         if (riscv_cpu_cfg(env)->ext_ssctr) {
             wr_mask |= SMSTATEEN0_CTR;
+        }
+        if (riscv_cpu_cfg(env)->pdis_regs) {
+            wr_mask |= XPDIS_STATEEN;
         }
     }
 
@@ -6344,6 +6469,21 @@ riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
                         .min_priv_ver = PRIV_VERSION_1_12_0               },
 
     /* Supervisor Counter Delegation */
+    [CSR_XPDIS_MCTL] = {"mpdisctl-test", pdis_regs,
+                        read_pdis_ctl, write_pdis_ctl},
+    [CSR_XPDIS_SCTL] = {"spdisctl-test", pdis_regs,
+                        read_pdis_ctl, write_pdis_ctl},
+    [CSR_XPDIS_COUNTER] = {"spdiscounter-test", pdis_regs,
+                           read_pdis_counter, write_pdis_counter},
+    [CSR_XPDIS_EVMASK] = {"spdisevmask-test", pdis_regs,
+                          read_zero, write_ignore},
+    [CSR_XPDIS_EVMATCH] = {"spdisevmatch-test", pdis_regs,
+                           read_zero, write_ignore},
+    [CSR_XPDIS_FILTER] = {"spdisfilter-test", pdis_regs,
+                          read_zero, write_ignore},
+    [CSR_XPDIS_VSCTL] = {"vspdisctl-test", pdis_regs,
+                         read_pdis_ctl, write_pdis_ctl},
+
     [CSR_SCOUNTINHIBIT] = {"scountinhibit", scountinhibit_pred,
                             read_scountinhibit, write_scountinhibit,
                            .min_priv_ver = PRIV_VERSION_1_12_0 },

@@ -451,6 +451,10 @@ struct CPUArchState {
 
     uint32_t scountinhibit;
     uint32_t mcountinhibit;
+    /* Static PDIS register reference model, not an instruction sampler. */
+    uint64_t pdis_ctl;
+    uint64_t pdis_vsctl;
+    uint64_t pdis_counter;
 
     /* PMU cycle & instret privilege mode filtering */
     uint64_t mcyclecfg;

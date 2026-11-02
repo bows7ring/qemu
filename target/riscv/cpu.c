@@ -1020,6 +1020,13 @@ static void riscv_cpu_reset_hold(Object *obj, ResetType type)
     env->mstatus = set_field(env->mstatus, MSTATUS_SBE, cpu->cfg.big_endian);
     env->mstatus = set_field(env->mstatus, MSTATUS_UBE, cpu->cfg.big_endian);
     env->mcause = 0;
+    env->pdis_ctl = 0;
+    env->pdis_vsctl = 0;
+    env->pdis_counter = 0;
+    env->mcountinhibit &= ~XPDIS_INHIBIT;
+    if (cpu->cfg.pdis_regs) {
+        env->mcountinhibit |= XPDIS_INHIBIT;
+    }
     env->miclaim = MIP_SGEIP;
     env->pc = env->resetvec;
     env->bins = 0;
@@ -1331,6 +1338,13 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
     RISCVCPU *cpu = RISCV_CPU(dev);
     RISCVCPUClass *mcc = RISCV_CPU_GET_CLASS(dev);
     Error *local_err = NULL;
+
+#ifndef CONFIG_USER_ONLY
+    if (cpu->cfg.pdis_regs && !tcg_enabled()) {
+        error_setg(errp, "x-pdis-regs requires TCG");
+        return;
+    }
+#endif
 
     cpu_common_realize(cs, &local_err);
     if (local_err != NULL) {
@@ -3070,6 +3084,7 @@ static const Property riscv_cpu_properties[] = {
     {.name = "marchid", .info = &prop_marchid},
 
 #ifndef CONFIG_USER_ONLY
+    DEFINE_PROP_BOOL("x-pdis-regs", RISCVCPU, cfg.pdis_regs, false),
     DEFINE_PROP_UINT64("resetvec", RISCVCPU, env.resetvec, DEFAULT_RSTVEC),
     DEFINE_PROP_UINT64("rnmi-interrupt-vector", RISCVCPU, env.rnmi_irqvec,
                        DEFAULT_RNMI_IRQVEC),

@@ -362,6 +362,22 @@
 #define SMSTATEEN0_AIA      (1ULL << 59)
 #define SMSTATEEN0_SVSLCT   (1ULL << 60)
 #define SMSTATEEN0_HSENVCFG (1ULL << 62)
+
+/* Local RV64 PDIS register experiment; NOT architectural allocations. */
+#define CSR_XPDIS_MCTL      0x7d0
+#define CSR_XPDIS_SCTL      0x5e0
+#define CSR_XPDIS_COUNTER   0x5e1
+#define CSR_XPDIS_EVMASK    0x5e2
+#define CSR_XPDIS_EVMATCH   0x5e3
+#define CSR_XPDIS_FILTER    0x5e4
+#define CSR_XPDIS_VSCTL     0x6d0
+#define XPDIS_STATEEN      (1ULL << 55)
+#define XPDIS_INHIBIT      (1U << 1)
+#define XPDIS_CTL_SEL      7ULL
+#define XPDIS_CTL_U        (1ULL << 60)
+#define XPDIS_CTL_S        (1ULL << 61)
+#define XPDIS_CTL_M        (1ULL << 62)
+#define XPDIS_CTL_OF       (1ULL << 63)
 #define SMSTATEEN_STATEEN   (1ULL << 63)
 
 /* Enhanced Physical Memory Protection (ePMP) */
