@@ -117,6 +117,7 @@ typedef struct DisasContext {
     /* FRM is known to contain a valid value. */
     bool frm_valid;
     bool insn_start_updated;
+    bool pdis;
     const GPtrArray *decoders;
     /* zicfilp extension. fcfi_enabled, lp expected or not */
     bool fcfi_enabled;
@@ -285,6 +286,9 @@ static void gen_exception_inst_addr_mis(DisasContext *ctx, TCGv target)
 static void lookup_and_goto_ptr(DisasContext *ctx)
 {
 #ifndef CONFIG_USER_ONLY
+    if (ctx->pdis) {
+        gen_helper_pdis_end(tcg_env);
+    }
     if (ctx->itrigger) {
         gen_helper_itrigger_match(tcg_env);
     }
@@ -292,12 +296,19 @@ static void lookup_and_goto_ptr(DisasContext *ctx)
         gen_helper_sdext_step(tcg_env);
     }
 #endif
-    tcg_gen_lookup_and_goto_ptr();
+    if (ctx->pdis) {
+        tcg_gen_exit_tb(NULL, 0);
+    } else {
+        tcg_gen_lookup_and_goto_ptr();
+    }
 }
 
 static void exit_tb(DisasContext *ctx)
 {
 #ifndef CONFIG_USER_ONLY
+    if (ctx->pdis) {
+        gen_helper_pdis_end(tcg_env);
+    }
     if (ctx->itrigger) {
         gen_helper_itrigger_match(tcg_env);
     }
@@ -318,7 +329,7 @@ static void gen_goto_tb(DisasContext *ctx, unsigned tb_slot_idx,
       * direct block chain benefits will be small.
       */
     if (translator_use_goto_tb(&ctx->base, dest) &&
-        !ctx->itrigger && !ctx->sdext_step) {
+        !ctx->itrigger && !ctx->sdext_step && !ctx->pdis) {
         /*
          * For pcrel, the pc must always be up-to-date on entry to
          * the linked TB, so that it can use simple additions for all
@@ -1336,6 +1347,11 @@ static void riscv_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->misa_ext = env->misa_ext;
     ctx->frm = -1;  /* unknown rounding mode */
     ctx->cfg_ptr = &(cpu->cfg);
+    ctx->pdis = FIELD_EX64(ext_tb_flags, EXT_TB_FLAGS, PDIS);
+    if (ctx->pdis) {
+        /* Complete and check the sampling interrupt before another insn. */
+        ctx->base.max_insns = 1;
+    }
     ctx->vill = FIELD_EX32(tb_flags, TB_FLAGS, VILL);
     ctx->sew = FIELD_EX32(tb_flags, TB_FLAGS, SEW);
     ctx->lmul = sextract32(FIELD_EX32(tb_flags, TB_FLAGS, LMUL), 0, 3);
@@ -1387,12 +1403,76 @@ static void riscv_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
     ctx->insn_start_updated = false;
 }
 
+#ifndef CONFIG_USER_ONLY
+/* Basic RV64 memory/control classes for the local model. */
+static unsigned pdis_insn_type(uint32_t op, unsigned len)
+{
+    unsigned funct3 = extract32(op, 13, 3);
+
+    if (len == 2) {
+        switch (op & 3) {
+        case 0:
+        case 2:
+            if (funct3 >= 1 && funct3 <= 3) {
+                return 1;
+            }
+            if (funct3 >= 5) {
+                return 2;
+            }
+            if ((op & 3) == 2 && funct3 == 4 &&
+                extract32(op, 2, 5) == 0 && extract32(op, 7, 5) != 0) {
+                return 4; /* C.JR/C.JALR, not C.EBREAK. */
+            }
+            break;
+        case 1:
+            if (funct3 >= 5) {
+                return 4;
+            }
+            break;
+        }
+        return 0;
+    }
+    switch (op & 0x7f) {
+    case 0x03:
+    case 0x07:
+        return 1;
+    case 0x23:
+    case 0x27:
+        return 2;
+    case 0x2f:
+        return extract32(op, 27, 5) == 2 ? 1 :
+               extract32(op, 27, 5) == 3 ? 2 : 3;
+    case 0x63:
+    case 0x67:
+    case 0x6f:
+        return 4;
+    case 0x73:
+        if (op == 0x10200073 || op == 0x30200073 ||
+            op == 0x70200073 || op == 0x7b200073) {
+            return 4;
+        }
+        break;
+    }
+    return 0;
+}
+#endif
+
 static void riscv_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
     CPURISCVState *env = cpu_env(cpu);
 
     decode_opc(env, ctx);
+#ifndef CONFIG_USER_ONLY
+    if (ctx->pdis &&
+        !(tb_cflags(ctx->base.tb) & (CF_STEP_ATOMIC | CF_MEMI_ONLY))) {
+        unsigned type = pdis_insn_type(ctx->opcode, ctx->cur_insn_len);
+
+        tcg_ctx->emit_before_op = QTAILQ_NEXT(ctx->base.insn_start, link);
+        gen_helper_pdis_begin(tcg_env, cpu_pc, tcg_constant_i32(type));
+        tcg_ctx->emit_before_op = NULL;
+    }
+#endif
     ctx->base.pc_next += ctx->cur_insn_len;
 
     /*

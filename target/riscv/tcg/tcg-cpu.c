@@ -197,6 +197,8 @@ static TCGTBCPUState riscv_get_tb_cpu_state(CPUState *cs)
     ext_flags = FIELD_DP64(ext_flags, EXT_TB_FLAGS, BIG_ENDIAN,
                            mo_endian_env(env) == MO_BE);
 #ifndef CONFIG_USER_ONLY
+    ext_flags = FIELD_DP64(ext_flags, EXT_TB_FLAGS, PDIS,
+                           riscv_pdis_enabled(env));
     if (cpu->cfg.ext_sdext && !env->debug_mode && (env->dcsr & DCSR_STEP)) {
         ext_flags = FIELD_DP64(ext_flags, EXT_TB_FLAGS, SDEXT_STEP, 1);
     }

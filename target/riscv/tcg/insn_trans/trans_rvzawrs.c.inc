@@ -34,6 +34,9 @@ static bool trans_wrs_sto(DisasContext *ctx, arg_wrs_sto *a)
     tcg_gen_movi_tl(load_res, -1);
 
     gen_update_pc(ctx, ctx->cur_insn_len);
+    if (ctx->pdis) {
+        gen_helper_pdis_end(tcg_env);
+    }
     tcg_gen_exit_tb(NULL, 0);
     ctx->base.is_jmp = DISAS_NORETURN;
 

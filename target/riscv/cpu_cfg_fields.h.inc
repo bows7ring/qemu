@@ -170,6 +170,7 @@ BOOL_FIELD(pmp)
 BOOL_FIELD(debug)
 BOOL_FIELD(misa_w)
 BOOL_FIELD(pdis_regs)
+BOOL_FIELD(pdis_sample)
 
 BOOL_FIELD(short_isa_string)
 

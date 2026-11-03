@@ -465,7 +465,11 @@ static RISCVException write_pdis_ctl(CPURISCVState *env, int csrno,
         mask &= ~(XPDIS_CTL_U | XPDIS_CTL_S);
     }
     env->pdis_ctl = (env->pdis_ctl & ~mask) | (val & mask);
-    /* No TCG instruction-selection hook: software writes never raise LCOFI. */
+    if (!(env->pdis_ctl & (XPDIS_CTL_M | XPDIS_CTL_S | XPDIS_CTL_U)) &&
+        !env->pdis_vsctl) {
+        env->pdis_selected = false;
+    }
+    /* Software writes to OF do not generate an interrupt. */
     return RISCV_EXCP_NONE;
 }
 
@@ -479,7 +483,8 @@ static RISCVException read_pdis_counter(CPURISCVState *env, int csrno,
 static RISCVException write_pdis_counter(CPURISCVState *env, int csrno,
                                         target_ulong val, uintptr_t ra)
 {
-    /* Both 32-bit fields are writable; they do not advance in this model. */
+    /* Reprogramming abandons the local model's synchronous selection. */
+    env->pdis_selected = false;
     env->pdis_counter = val;
     return RISCV_EXCP_NONE;
 }
@@ -3018,9 +3023,12 @@ static int rmw_xireg_csrind(CPURISCVState *env, int csrno,
         if (ret != RISCV_EXCP_NONE) {
             return ret;
         }
-        /* Empty, read-only window: no samples are manufactured. */
+        /* Reserved words at 0x61 and all sample-window writes are ignored. */
         if (val) {
-            *val = 0;
+            unsigned reg = csrno & 7;
+            unsigned word = reg >= 5 ? reg - 2 : reg - 1;
+
+            *val = isel == 0x60 ? env->pdis_record[word] : 0;
         }
         return RISCV_EXCP_NONE;
     }

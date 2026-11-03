@@ -22,6 +22,10 @@
 #include "cpu.h"
 #include "qapi/error.h"
 
+bool riscv_pdis_enabled(CPURISCVState *env);
+void riscv_pdis_begin(CPURISCVState *env, target_ulong pc, uint32_t type);
+void riscv_pdis_end(CPURISCVState *env);
+
 bool riscv_pmu_ctr_monitor_instructions(CPURISCVState *env,
                                         uint32_t target_ctr);
 bool riscv_pmu_ctr_monitor_cycles(CPURISCVState *env,

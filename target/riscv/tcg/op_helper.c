@@ -34,6 +34,20 @@
 #include "trace.h"
 
 /* Exceptions processing helpers */
+void HELPER(pdis_begin)(CPURISCVState *env, target_ulong pc, uint32_t type)
+{
+#ifndef CONFIG_USER_ONLY
+    riscv_pdis_begin(env, pc, type);
+#endif
+}
+
+void HELPER(pdis_end)(CPURISCVState *env)
+{
+#ifndef CONFIG_USER_ONLY
+    riscv_pdis_end(env);
+#endif
+}
+
 G_NORETURN void riscv_raise_exception(CPURISCVState *env,
                                       RISCVException exception,
                                       uintptr_t pc)
@@ -639,6 +653,9 @@ void HELPER(wfi)(CPURISCVState *env)
                (prv_u || (prv_s && get_field(env->hstatus, HSTATUS_VTW)))) {
         riscv_raise_exception(env, RISCV_EXCP_VIRT_INSTRUCTION_FAULT, GETPC());
     } else {
+#ifndef CONFIG_USER_ONLY
+        riscv_pdis_end(env);
+#endif
         if (riscv_cpu_cfg(env)->ext_sdext && !env->debug_mode &&
             (env->dcsr & DCSR_STEP)) {
             return;

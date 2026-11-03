@@ -2197,6 +2197,11 @@ void riscv_cpu_do_interrupt(CPUState *cs)
     int mxlen = 16 << riscv_cpu_mxl(env);
     bool nnmi_excep = false;
 
+    if (!async && cpu->cfg.pdis_sample) {
+        /* A selected instruction may complete by trapping. */
+        riscv_pdis_end(env);
+    }
+
     if (cpu->cfg.ext_smrnmi && env->rnmip && async) {
         riscv_do_nmi(env, cause | ((target_ulong)1U << (mxlen - 1)),
                      env->virt_enabled);

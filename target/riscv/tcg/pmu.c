@@ -27,6 +27,65 @@
 
 #define RISCV_TIMEBASE_FREQ 1000000000 /* 1Ghz */
 
+bool riscv_pdis_enabled(CPURISCVState *env)
+{
+    uint64_t ctl = env->virt_enabled ? env->pdis_vsctl : env->pdis_ctl;
+    uint64_t mode = env->priv == PRV_M ? XPDIS_CTL_M :
+                    env->priv == PRV_S ? XPDIS_CTL_S : XPDIS_CTL_U;
+
+    return riscv_cpu_cfg(env)->pdis_sample &&
+           !(env->mcountinhibit & XPDIS_INHIBIT) && (ctl & mode);
+}
+
+void riscv_pdis_begin(CPURISCVState *env, target_ulong pc, uint32_t type)
+{
+    uint32_t count, initial;
+    unsigned sel = env->pdis_ctl & XPDIS_CTL_SEL;
+
+    env->pdis_selected = false;
+    if (!riscv_pdis_enabled(env) ||
+        (sel == 1 && !(type & 1)) ||
+        (sel == 2 && !(type & 2)) ||
+        (sel == 3 && !(type & 3)) || (sel == 4 && type != 4)) {
+        return;
+    }
+
+    count = env->pdis_counter;
+    initial = env->pdis_counter >> 32;
+    count++;
+    env->pdis_counter = ((uint64_t)initial << 32) | count;
+    if (count) {
+        return;
+    }
+    env->pdis_counter |= initial;
+    env->pdis_selected_pc = pc;
+    env->pdis_selected_type = type;
+    env->pdis_selected = true;
+}
+
+void riscv_pdis_end(CPURISCVState *env)
+{
+    bool was_pending;
+
+    if (!env->pdis_selected) {
+        return;
+    }
+    env->pdis_selected = false;
+    if (env->mcountinhibit & XPDIS_INHIBIT) {
+        return;
+    }
+
+    /* No cache, speculation, latency, address or timestamp simulation. */
+    memset(env->pdis_record, 0, sizeof(env->pdis_record));
+    env->pdis_record[0] = env->pdis_selected_type;
+    env->pdis_record[1] = env->pdis_selected_pc;
+    was_pending = env->pdis_ctl & XPDIS_CTL_OF;
+    env->pdis_ctl |= XPDIS_CTL_OF;
+    if (!was_pending) {
+        riscv_cpu_update_mip(env, MIP_LCOFIP, MIP_LCOFIP);
+    }
+}
+
 static bool riscv_pmu_counter_valid(RISCVCPU *cpu, uint32_t ctr_idx)
 {
     if (ctr_idx < 3 || ctr_idx >= RV_MAX_MHPMCOUNTERS ||

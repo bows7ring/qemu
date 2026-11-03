@@ -155,6 +155,9 @@ static bool trans_mnret(DisasContext *ctx, arg_mnret *a)
     REQUIRE_SMRNMI(ctx);
     decode_save_opc(ctx, 0);
     gen_helper_mnret(cpu_pc, tcg_env);
+    if (ctx->pdis) {
+        gen_helper_pdis_end(tcg_env);
+    }
     tcg_gen_exit_tb(NULL, 0); /* no chaining */
     ctx->base.is_jmp = DISAS_NORETURN;
     return true;

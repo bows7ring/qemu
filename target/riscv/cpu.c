@@ -1023,6 +1023,10 @@ static void riscv_cpu_reset_hold(Object *obj, ResetType type)
     env->pdis_ctl = 0;
     env->pdis_vsctl = 0;
     env->pdis_counter = 0;
+    memset(env->pdis_record, 0, sizeof(env->pdis_record));
+    env->pdis_selected_pc = 0;
+    env->pdis_selected_type = 0;
+    env->pdis_selected = false;
     env->mcountinhibit &= ~XPDIS_INHIBIT;
     if (cpu->cfg.pdis_regs) {
         env->mcountinhibit |= XPDIS_INHIBIT;
@@ -1340,6 +1344,10 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
     Error *local_err = NULL;
 
 #ifndef CONFIG_USER_ONLY
+    if (cpu->cfg.pdis_sample && !cpu->cfg.pdis_regs) {
+        error_setg(errp, "x-pdis-sample requires x-pdis-regs");
+        return;
+    }
     if (cpu->cfg.pdis_regs && !tcg_enabled()) {
         error_setg(errp, "x-pdis-regs requires TCG");
         return;
@@ -3085,6 +3093,7 @@ static const Property riscv_cpu_properties[] = {
 
 #ifndef CONFIG_USER_ONLY
     DEFINE_PROP_BOOL("x-pdis-regs", RISCVCPU, cfg.pdis_regs, false),
+    DEFINE_PROP_BOOL("x-pdis-sample", RISCVCPU, cfg.pdis_sample, false),
     DEFINE_PROP_UINT64("resetvec", RISCVCPU, env.resetvec, DEFAULT_RSTVEC),
     DEFINE_PROP_UINT64("rnmi-interrupt-vector", RISCVCPU, env.rnmi_irqvec,
                        DEFAULT_RNMI_IRQVEC),
