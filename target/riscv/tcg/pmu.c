@@ -37,6 +37,20 @@ bool riscv_pdis_enabled(CPURISCVState *env)
            !(env->mcountinhibit & XPDIS_INHIBIT) && (ctl & mode);
 }
 
+static void riscv_pdis_publish(CPURISCVState *env, uint64_t pc, uint32_t type)
+{
+    bool was_pending = env->pdis_ctl & XPDIS_CTL_OF;
+
+    /* No cache, speculation, latency, address or timestamp simulation. */
+    memset(env->pdis_record, 0, sizeof(env->pdis_record));
+    env->pdis_record[0] = type;
+    env->pdis_record[1] = pc;
+    env->pdis_ctl |= XPDIS_CTL_OF;
+    if (!was_pending) {
+        riscv_cpu_update_mip(env, MIP_LCOFIP, MIP_LCOFIP);
+    }
+}
+
 void riscv_pdis_begin(CPURISCVState *env, target_ulong pc, uint32_t type)
 {
     uint32_t count, initial;
@@ -48,6 +62,11 @@ void riscv_pdis_begin(CPURISCVState *env, target_ulong pc, uint32_t type)
         (sel == 2 && !(type & 2)) ||
         (sel == 3 && !(type & 3)) || (sel == 4 && type != 4)) {
         return;
+    }
+
+    /* Only later qualifying instructions advance the experimental delay. */
+    if (env->pdis_delay_left && !--env->pdis_delay_left) {
+        riscv_pdis_publish(env, env->pdis_delayed_pc, env->pdis_delayed_type);
     }
 
     count = env->pdis_counter;
@@ -65,7 +84,7 @@ void riscv_pdis_begin(CPURISCVState *env, target_ulong pc, uint32_t type)
 
 void riscv_pdis_end(CPURISCVState *env)
 {
-    bool was_pending;
+    uint32_t delay = riscv_cpu_cfg(env)->pdis_delay;
 
     if (!env->pdis_selected) {
         return;
@@ -75,14 +94,12 @@ void riscv_pdis_end(CPURISCVState *env)
         return;
     }
 
-    /* No cache, speculation, latency, address or timestamp simulation. */
-    memset(env->pdis_record, 0, sizeof(env->pdis_record));
-    env->pdis_record[0] = env->pdis_selected_type;
-    env->pdis_record[1] = env->pdis_selected_pc;
-    was_pending = env->pdis_ctl & XPDIS_CTL_OF;
-    env->pdis_ctl |= XPDIS_CTL_OF;
-    if (!was_pending) {
-        riscv_cpu_update_mip(env, MIP_LCOFIP, MIP_LCOFIP);
+    if (!delay) {
+        riscv_pdis_publish(env, env->pdis_selected_pc, env->pdis_selected_type);
+    } else if (!env->pdis_delay_left) {
+        env->pdis_delayed_pc = env->pdis_selected_pc;
+        env->pdis_delayed_type = env->pdis_selected_type;
+        env->pdis_delay_left = delay;
     }
 }
 

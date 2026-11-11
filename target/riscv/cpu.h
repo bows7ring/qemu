@@ -459,6 +459,9 @@ struct CPUArchState {
     uint64_t pdis_selected_pc;
     uint32_t pdis_selected_type;
     bool pdis_selected;
+    uint64_t pdis_delayed_pc;
+    uint32_t pdis_delayed_type;
+    uint32_t pdis_delay_left;
 
     /* PMU cycle & instret privilege mode filtering */
     uint64_t mcyclecfg;

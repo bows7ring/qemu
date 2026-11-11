@@ -426,7 +426,7 @@ static bool pdis_regs_needed(void *opaque)
 
 static const VMStateDescription vmstate_pdis_regs = {
     .name = "cpu/pdis-registers-test",
-    .version_id = 2,
+    .version_id = 3,
     .minimum_version_id = 1,
     .needed = pdis_regs_needed,
     .fields = (const VMStateField[]) {
@@ -437,6 +437,9 @@ static const VMStateDescription vmstate_pdis_regs = {
         VMSTATE_UINT64_V(env.pdis_selected_pc, RISCVCPU, 2),
         VMSTATE_UINT32_V(env.pdis_selected_type, RISCVCPU, 2),
         VMSTATE_BOOL_V(env.pdis_selected, RISCVCPU, 2),
+        VMSTATE_UINT64_V(env.pdis_delayed_pc, RISCVCPU, 3),
+        VMSTATE_UINT32_V(env.pdis_delayed_type, RISCVCPU, 3),
+        VMSTATE_UINT32_V(env.pdis_delay_left, RISCVCPU, 3),
         VMSTATE_END_OF_LIST()
     }
 };

@@ -468,6 +468,9 @@ static RISCVException write_pdis_ctl(CPURISCVState *env, int csrno,
     if (!(env->pdis_ctl & (XPDIS_CTL_M | XPDIS_CTL_S | XPDIS_CTL_U)) &&
         !env->pdis_vsctl) {
         env->pdis_selected = false;
+        if (!riscv_cpu_cfg(env)->pdis_keep_pending) {
+            env->pdis_delay_left = 0;
+        }
     }
     /* Software writes to OF do not generate an interrupt. */
     return RISCV_EXCP_NONE;

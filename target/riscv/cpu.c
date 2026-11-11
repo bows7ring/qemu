@@ -1027,6 +1027,9 @@ static void riscv_cpu_reset_hold(Object *obj, ResetType type)
     env->pdis_selected_pc = 0;
     env->pdis_selected_type = 0;
     env->pdis_selected = false;
+    env->pdis_delayed_pc = 0;
+    env->pdis_delayed_type = 0;
+    env->pdis_delay_left = 0;
     env->mcountinhibit &= ~XPDIS_INHIBIT;
     if (cpu->cfg.pdis_regs) {
         env->mcountinhibit |= XPDIS_INHIBIT;
@@ -1346,6 +1349,14 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
 #ifndef CONFIG_USER_ONLY
     if (cpu->cfg.pdis_sample && !cpu->cfg.pdis_regs) {
         error_setg(errp, "x-pdis-sample requires x-pdis-regs");
+        return;
+    }
+    if (cpu->cfg.pdis_delay && !cpu->cfg.pdis_sample) {
+        error_setg(errp, "x-pdis-delay requires x-pdis-sample");
+        return;
+    }
+    if (cpu->cfg.pdis_keep_pending && !cpu->cfg.pdis_delay) {
+        error_setg(errp, "x-pdis-keep-pending requires nonzero x-pdis-delay");
         return;
     }
     if (cpu->cfg.pdis_regs && !tcg_enabled()) {
@@ -3094,6 +3105,8 @@ static const Property riscv_cpu_properties[] = {
 #ifndef CONFIG_USER_ONLY
     DEFINE_PROP_BOOL("x-pdis-regs", RISCVCPU, cfg.pdis_regs, false),
     DEFINE_PROP_BOOL("x-pdis-sample", RISCVCPU, cfg.pdis_sample, false),
+    DEFINE_PROP_UINT32("x-pdis-delay", RISCVCPU, cfg.pdis_delay, 0),
+    DEFINE_PROP_BOOL("x-pdis-keep-pending", RISCVCPU, cfg.pdis_keep_pending, false),
     DEFINE_PROP_UINT64("resetvec", RISCVCPU, env.resetvec, DEFAULT_RSTVEC),
     DEFINE_PROP_UINT64("rnmi-interrupt-vector", RISCVCPU, env.rnmi_irqvec,
                        DEFAULT_RNMI_IRQVEC),

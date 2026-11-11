@@ -171,6 +171,7 @@ BOOL_FIELD(debug)
 BOOL_FIELD(misa_w)
 BOOL_FIELD(pdis_regs)
 BOOL_FIELD(pdis_sample)
+BOOL_FIELD(pdis_keep_pending)
 
 BOOL_FIELD(short_isa_string)
 
@@ -179,6 +180,7 @@ TYPED_FIELD(uint64_t, marchid, 0)
 TYPED_FIELD(uint64_t, mimpid, 0)
 
 TYPED_FIELD(uint32_t, pmu_mask, 0)
+TYPED_FIELD(uint32_t, pdis_delay, 0)
 TYPED_FIELD(uint16_t, vlenb, 0)
 TYPED_FIELD(uint16_t, elen, 0)
 TYPED_FIELD(uint16_t, cbom_blocksize, 0)
